@@ -1,4 +1,4 @@
-// 1
+// 2
 
 pipeline {
   agent {
@@ -9,6 +9,7 @@ pipeline {
 apiVersion: v1
 kind: Pod
 metadata:
+  namespace: csw
   annotations:
     sidecar.istio.io/inject: "false"
 spec:
