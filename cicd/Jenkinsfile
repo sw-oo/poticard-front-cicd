@@ -1,4 +1,4 @@
-// 12
+// 13
 
 pipeline {
   agent {
@@ -77,7 +77,7 @@ spec:
               --dockerfile=${WORKSPACE}/Dockerfile \
               --destination=${IMAGE_NAME}:${IMAGE_TAG} \
               --destination=${IMAGE_NAME}:latest \
-              --build-arg VITE_BACKEND_URL=\${BACKEND_API_URL}
+              --build-arg VITE_BACKEND_URL=\${BACKEND_API_URL} \
               --single-snapshot \
               --use-new-run \
               --cache=true \
