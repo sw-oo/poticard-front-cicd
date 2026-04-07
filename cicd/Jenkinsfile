@@ -1,4 +1,4 @@
-// 13
+// 1
 
 pipeline {
   agent {
@@ -25,43 +25,53 @@ spec:
       volumeMounts:
         - name: docker-config
           mountPath: /kaniko/.docker
-        - name: workspace
-          mountPath: /workspace
+    - name: kubectl
+      image: rancher/kubectl:v1.31.0
+      command: ['cat']
+      tty: true
+      volumeMounts:
+        - name: kubeconfig
+          mountPath: /kube
+          readOnly: true
   volumes:
-    - name: workspace
-      emptyDir: {}
     - name: docker-config
       secret:
         secretName: dockerhub-cred
         items:
           - key: .dockerconfigjson
             path: config.json
+    - name: kubeconfig
+      secret:
+        secretName: jenkins-kubeconfig
+        items:
+          - key: config
+            path: config
 """
     }
   }
 
   environment {
-    IMAGE_NAME = 'seungwoo0128/frontend'   
+    IMAGE_NAME = 'seungwoo0128/frontend'
     IMAGE_TAG  = "3.${env.BUILD_NUMBER}"
-    BACKEND_API_URL = "http://192.100.5.114:8080"
+    BACKEND_API_URL = 'http://192.100.5.114:8080'
+    K8S_NAMESPACE = 'csw'
+    UPDATE_STABLE = 'false'
   }
+
   stages {
     stage('Checkout') {
       steps {
         container('node') {
-          checkout([$class: 'GitSCM',
-            branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/sw-oo/poticard-front-cicd.git/']]
-          ])
+          checkout scm
         }
       }
     }
 
-    stage('Gradle Build') {
+    stage('Build') {
       steps {
         container('node') {
           sh '''
-            npm i
+            npm ci
             npm run build
           '''
         }
@@ -72,16 +82,42 @@ spec:
       steps {
         container('kaniko') {
           sh """
-            /kaniko/executor \
-              --context=${WORKSPACE} \
-              --dockerfile=${WORKSPACE}/Dockerfile \
-              --destination=${IMAGE_NAME}:${IMAGE_TAG} \
-              --destination=${IMAGE_NAME}:latest \
-              --build-arg VITE_BACKEND_URL=\${BACKEND_API_URL} \
-              --single-snapshot \
-              --use-new-run \
-              --cache=true \
+            /kaniko/executor \\
+              --context=${env.WORKSPACE} \\
+              --dockerfile=${env.WORKSPACE}/cicd/Dockerfile \\
+              --destination=${env.IMAGE_NAME}:${env.IMAGE_TAG} \\
+              --destination=${env.IMAGE_NAME}:latest \\
+              --single-snapshot \\
+              --use-new-run \\
+              --cache=true \\
               --snapshotMode=redo
+          """
+        }
+      }
+    }
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        container('kubectl') {
+          sh """
+            set -e
+            export KUBECONFIG=/kube/config
+            NS='${env.K8S_NAMESPACE}'
+            CICD='${env.WORKSPACE}/cicd'
+
+            kubectl apply -n "\${NS}" -f "\${CICD}/Frontend Service Stable.yaml"
+            kubectl apply -n "\${NS}" -f "\${CICD}/Frontend Service Canary.yaml"
+            kubectl apply -n "\${NS}" -f "\${CICD}/Frontend Ingress Stable.yaml"
+            kubectl apply -n "\${NS}" -f "\${CICD}/Frontend Ingress Canary.yaml"
+
+            sed "s|image:.*|        image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|" "\${CICD}/Frontend Deploy Canary.yaml" | kubectl apply -n "\${NS}" -f -
+
+            if [ '${env.UPDATE_STABLE}' = 'true' ]; then
+              sed "s|image:.*|        image: ${env.IMAGE_NAME}:${env.IMAGE_TAG}|" "\${CICD}/Frontend Deploy Stable.yaml" | kubectl apply -n "\${NS}" -f -
+              kubectl rollout status deployment/poticard-frontend-stable -n "\${NS}" --timeout=180s
+            fi
+
+            kubectl rollout status deployment/poticard-frontend-canary -n "\${NS}" --timeout=180s
           """
         }
       }
@@ -89,7 +125,7 @@ spec:
 
     stage('Result') {
       steps {
-        echo "Pushed: ${IMAGE_NAME}:${IMAGE_TAG}"
+        echo "Pushed & deployed: ${env.IMAGE_NAME}:${env.IMAGE_TAG} (namespace: ${env.K8S_NAMESPACE})"
       }
     }
   }
