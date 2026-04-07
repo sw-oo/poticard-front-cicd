@@ -1,4 +1,4 @@
-// 11
+// 12
 
 pipeline {
   agent {
@@ -51,7 +51,7 @@ spec:
         container('node') {
           checkout([$class: 'GitSCM',
             branches: [[name: '*/main']],
-            userRemoteConfigs: [[url: 'https://github.com/sw-oo/poticard-front-cicd.git']]
+            userRemoteConfigs: [[url: 'https://github.com/sw-oo/poticard-front-cicd.git/']]
           ])
         }
       }
